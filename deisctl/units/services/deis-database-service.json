@@ -11,8 +11,8 @@
    "spec":{
       "ports": [
         {
-          "port":80,
-          "targetPort":5432,
+          "port":5432,
+          "targetPort": "db-port",
           "protocol":"TCP"
         }
       ],
