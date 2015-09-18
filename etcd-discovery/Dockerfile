@@ -14,5 +14,5 @@ RUN curl -sSL https://github.com/coreos/etcd/releases/download/v2.2.0-rc.0/etcd-
     && chmod +x /usr/local/bin/etcd \
     && rm -rf /opt/etcd-v2.2.0-rc.0-linux-amd64 /opt/etcd.tgz
 
-EXPOSE 2379
+EXPOSE 2381
 CMD ["/bin/boot"]

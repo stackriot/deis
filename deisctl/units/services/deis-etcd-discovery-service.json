@@ -12,7 +12,8 @@
       "ports": [
         {
           "name": "client",
-          "port":2379,
+          "port":2381,
+          "targetPort": 2381,
           "protocol":"TCP"
         }
       ],

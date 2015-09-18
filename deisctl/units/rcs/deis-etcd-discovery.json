@@ -30,17 +30,20 @@
             "containers":[
                {
                   "name":"deis-etcd-discovery-rc",
-                  "image":"upstream:5000/deis/etcd-discovery:1",
+                  "image":"upstream:5000/deis/etcd-discovery:4",
                   "ports": [
                     {
-                      "hostPort": 2379,
-                      "containerPort":2379
+                      "containerPort":2381
                     }
                   ],
                    "env":[
                      {
                        "name": "DEIS_ETCD_CLUSTER_SIZE",
                        "value": "3"
+                     },
+                     {
+                       "name": "ETCD_LISTEN_CLIENT_URLS",
+                       "value": "http://0.0.0.0:2381"
                      }
                    ],
                    "volumeMounts": [{

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"time"
@@ -13,7 +15,21 @@ import (
 
 func main() {
 
-	cmd := exec.Command("etcd")
+	ip, err := myIP()
+	if err != nil {
+		log.Printf("Failed to start because could not get IP: %s", err)
+		os.Exit(321)
+	}
+
+	port := os.Getenv("DEIS_ETCD_CLIENT_PORT")
+	if port == "" {
+		port = "2381"
+	}
+
+	aurl := fmt.Sprintf("http://%s:%s", ip, port)
+	curl := fmt.Sprintf("http://%s:%s,http://localhost:%s", ip, port, port)
+
+	cmd := exec.Command("etcd", "-advertise-client-urls", aurl, "-listen-client-urls", curl)
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
 	go func() {
@@ -40,7 +56,7 @@ func main() {
 	}
 
 	key := fmt.Sprintf(discovery.ClusterSizeKey, uuid)
-	cli := etcd.NewClient([]string{"http://localhost:2379"})
+	cli := etcd.NewClient([]string{"http://localhost:2381"})
 	if _, err := cli.Create(key, size, 0); err != nil {
 		log.Printf("Failed to add key: %s", err)
 	}
@@ -49,4 +65,30 @@ func main() {
 	if err := cmd.Wait(); err != nil {
 		log.Printf("Etcd stopped running: %s", err)
 	}
+}
+
+// myIP returns the IP assigned to eth0.
+//
+// This is OS specific (Linux in a container gets eth0).
+func myIP() (string, error) {
+	iface, err := net.InterfaceByName("eth0")
+	if err != nil {
+		return "", err
+	}
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return "", err
+	}
+	var ip string
+	for _, a := range addrs {
+		if ipnet, ok := a.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				ip = ipnet.IP.String()
+			}
+		}
+	}
+	if len(ip) == 0 {
+		return ip, errors.New("Found no IPv4 addresses.")
+	}
+	return ip, nil
 }
