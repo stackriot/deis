@@ -1,4 +1,6 @@
 exams:
   - name: HTTP Self Test
     interval: 30s
+  - name: Pod Self Test
+    interval: 5m
 historyLen: 20

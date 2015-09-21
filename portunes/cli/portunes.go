@@ -8,6 +8,7 @@ import (
 	"github.com/Masterminds/cookoo"
 	"github.com/codegangsta/cli"
 	"github.com/deis/deis/portunes"
+	"github.com/deis/deis/portunes/exam"
 
 	"gopkg.in/yaml.v2"
 )
@@ -54,6 +55,7 @@ func register(reg *cookoo.Registry) {
 			cookoo.Cmd{Name: "http", Fn: PingLocal},
 		},
 	})
+	exam.Register(reg)
 }
 
 func batteryFromYAML(filename string) (*portunes.Battery, error) {
