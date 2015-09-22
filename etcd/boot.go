@@ -1,14 +1,13 @@
 package main
 
 import (
-	"errors"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/deis/deis/builder/env"
+	"github.com/deis/deis/pkg/aboutme"
 	"github.com/deis/deis/pkg/etcd/discovery"
 
 	"github.com/Masterminds/cookoo"
@@ -33,14 +32,14 @@ func routes(reg *cookoo.Registry) {
 			},
 			// This synchronizes the local copy of env vars with the actual
 			// environment. So all of these vars are available in cxt: or in
-			// os.Getenv().
+			// os.Getenv(). They will also be available to the etcd process
+			// we spawn.
 			cookoo.Cmd{
 				Name: "vars",
 				Fn:   env.Get,
 				Using: []cookoo.Param{
 					{Name: "DEIS_ETCD_DISCOVERY_SERVICE_HOST"},
-					{Name: "DEIS_ETCD_DISCOVERY_SERVICE_PORT_CLIENT"},
-					{Name: "DEIS_ETCD_DISCOVERY_SERVICE_PORT_PEER"},
+					{Name: "DEIS_ETCD_DISCOVERY_SERVICE_PORT"},
 					{Name: "DEIS_ETCD_1_SERVICE_HOST"},
 					{Name: "DEIS_ETCD_2_SERVICE_HOST"},
 					{Name: "DEIS_ETCD_3_SERVICE_HOST"},
@@ -53,14 +52,8 @@ func routes(reg *cookoo.Registry) {
 
 					// Peer URLs are for traffic between etcd nodes.
 					// These point to internal IP addresses, not service addresses.
-					{
-						Name:         "ETCD_LISTEN_PEER_URLS",
-						DefaultValue: "http://$MY_IP:$MY_PORT_PEER",
-					},
-					{
-						Name:         "ETCD_INITIAL_ADVERTISE_PEER_URLS",
-						DefaultValue: "http://$MY_IP:$MY_PORT_PEER",
-					},
+					{Name: "ETCD_LISTEN_PEER_URLS", DefaultValue: "http://$MY_IP:$MY_PORT_PEER"},
+					{Name: "ETCD_INITIAL_ADVERTISE_PEER_URLS", DefaultValue: "http://$MY_IP:$MY_PORT_PEER"},
 
 					// This is for static cluster. Delete if we go with discovery.
 					/*
@@ -77,10 +70,7 @@ func routes(reg *cookoo.Registry) {
 						Name:         "ETCD_LISTEN_CLIENT_URLS",
 						DefaultValue: "http://$MY_IP:$MY_PORT_CLIENT,http://127.0.0.1:$MY_PORT_CLIENT",
 					},
-					{
-						Name:         "ETCD_ADVERTISE_CLIENT_URLS",
-						DefaultValue: "http://$MY_IP:$MY_PORT_CLIENT",
-					},
+					{Name: "ETCD_ADVERTISE_CLIENT_URLS", DefaultValue: "http://$MY_IP:$MY_PORT_CLIENT"},
 
 					// {Name: "ETCD_WAL_DIR", DefaultValue: "/var/"},
 					// {Name: "ETCD_MAX_WALS", DefaultValue: "5"},
@@ -91,7 +81,7 @@ func routes(reg *cookoo.Registry) {
 				Fn:   discoveryURL,
 				Using: []cookoo.Param{
 					{Name: "host", From: "cxt:DEIS_ETCD_DISCOVERY_SERVICE_HOST"},
-					{Name: "port", From: "cxt:DEIS_ETCD_DISCOVERY_SERVICE_PORT_CLIENT"},
+					{Name: "port", From: "cxt:DEIS_ETCD_DISCOVERY_SERVICE_PORT"},
 				},
 			},
 			cookoo.Cmd{
@@ -122,11 +112,12 @@ func routes(reg *cookoo.Registry) {
 // 	MY_PORT_CLIENT
 func iam(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
 	name := os.Getenv("ETCD_NAME")
-	ip, err := myIP()
+	ip, err := aboutme.MyIP()
 	if err != nil {
 		return nil, err
 	}
 	os.Setenv("MY_IP", ip)
+	os.Setenv("ETCD_NAME", os.Getenv("HOSTNAME"))
 
 	// TODO: Swap this with a regexp once the final naming convention has
 	// been decided.
@@ -151,32 +142,6 @@ func iam(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
 	passEnv("MY_PORT_CLIENT", fmt.Sprintf("$DEIS_ETCD_%d_SERVICE_PORT_CLIENT", index))
 	passEnv("MY_PORT_PEER", fmt.Sprintf("$DEIS_ETCD_%d_SERVICE_PORT_PEER", index))
 	return nil, nil
-}
-
-// myIP returns the IP assigned to eth0.
-//
-// This is OS specific (Linux in a container gets eth0).
-func myIP() (string, error) {
-	iface, err := net.InterfaceByName("eth0")
-	if err != nil {
-		return "", err
-	}
-	addrs, err := iface.Addrs()
-	if err != nil {
-		return "", err
-	}
-	var ip string
-	for _, a := range addrs {
-		if ipnet, ok := a.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-			if ipnet.IP.To4() != nil {
-				ip = ipnet.IP.String()
-			}
-		}
-	}
-	if len(ip) == 0 {
-		return ip, errors.New("Found no IPv4 addresses.")
-	}
-	return ip, nil
 }
 
 func passEnv(newName, passthru string) {
