@@ -7,10 +7,10 @@ import (
 	"github.com/Masterminds/cookoo/fmt"
 	"github.com/deis/deis/builder/confd"
 	"github.com/deis/deis/builder/docker"
-	"github.com/deis/deis/builder/env"
-	"github.com/deis/deis/builder/etcd"
 	"github.com/deis/deis/builder/git"
 	"github.com/deis/deis/builder/sshd"
+	"github.com/deis/deis/pkg/env"
+	"github.com/deis/deis/pkg/etcd"
 )
 
 // routes builds the Cookoo registry.

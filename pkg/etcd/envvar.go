@@ -28,6 +28,9 @@ func Get(c cookoo.Context, params *cookoo.Params) (interface{}, cookoo.Interrupt
 	for name, def := range params.AsMap() {
 		var val string
 		if val = os.Getenv(name); len(val) == 0 {
+			if def == nil {
+				def = ""
+			}
 			def := def.(string)
 			val = os.ExpandEnv(def)
 			// We want to make sure that any subsequent calls to Getenv

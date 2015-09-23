@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 package docker
 
 import (
@@ -17,7 +16,7 @@ import (
 	"github.com/Masterminds/cookoo"
 	"github.com/Masterminds/cookoo/log"
 	"github.com/Masterminds/cookoo/safely"
-	"github.com/deis/deis/builder/etcd"
+	"github.com/deis/deis/pkg/etcd"
 	docli "github.com/fsouza/go-dockerclient"
 )
 
