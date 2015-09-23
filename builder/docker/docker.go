@@ -16,8 +16,10 @@ import (
 	"github.com/Masterminds/cookoo"
 	"github.com/Masterminds/cookoo/log"
 	"github.com/Masterminds/cookoo/safely"
-	"github.com/deis/deis/pkg/etcd"
+	"github.com/coreos/etcd/client"
 	docli "github.com/fsouza/go-dockerclient"
+
+	"golang.org/x/net/context"
 )
 
 // Path to the Docker unix socket.
@@ -264,13 +266,15 @@ func buildImg(c cookoo.Context, path, tag string) ([]byte, error) {
 func Push(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
 	// docker tag deis/slugrunner:lastest HOST:PORT/deis/slugrunner:latest
 	// docker push HOST:PORT/deis/slugrunner:latest
-	client := p.Get("client", nil).(etcd.Getter)
+	cli := p.Get("client", nil).(client.Client)
 
-	host, err := client.Get("/deis/registry/host", false, false)
+	k := client.NewKeysAPI(cli)
+
+	host, err := k.Get(context.Background(), "/deis/registry/host", &client.GetOptions{})
 	if err != nil || host.Node == nil {
 		return nil, err
 	}
-	port, err := client.Get("/deis/registry/port", false, false)
+	port, err := k.Get(context.Background(), "/deis/registry/port", &client.GetOptions{})
 	if err != nil || host.Node == nil {
 		return nil, err
 	}
