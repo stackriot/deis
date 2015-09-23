@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -15,50 +14,20 @@ import (
 	"github.com/Masterminds/cookoo"
 	"github.com/Masterminds/cookoo/log"
 	"github.com/Masterminds/cookoo/safely"
-	"github.com/coreos/go-etcd/etcd"
+	"github.com/coreos/etcd/client"
+
+	"golang.org/x/net/context"
 )
 
-var (
-	retryCycles = 2
-	retrySleep  = 200 * time.Millisecond
-)
-
-// Getter describes the Get behavior of an Etcd client.
-//
-// Usually you will want to use go-etcd/etcd.Client to satisfy this.
-//
-// We use an interface because it is more testable.
-type Getter interface {
-	Get(string, bool, bool) (*etcd.Response, error)
-}
-
-// DirCreator describes etcd's CreateDir behavior.
-//
-// Usually you will want to use go-etcd/etcd.Client to satisfy this.
-type DirCreator interface {
-	CreateDir(string, uint64) (*etcd.Response, error)
-}
-
-// Watcher watches an etcd entry.
-type Watcher interface {
-	Watch(string, uint64, bool, chan *etcd.Response, chan bool) (*etcd.Response, error)
-}
-
-// Setter sets a value in Etcd.
-type Setter interface {
-	Set(string, string, uint64) (*etcd.Response, error)
-}
-
-// GetterSetter performs get and set operations.
-type GetterSetter interface {
-	Getter
-	Setter
+// dctx returns a default context for simpleEtcdClient.
+func dctx() context.Context {
+	return context.Background()
 }
 
 // CreateClient creates a new Etcd client and prepares it for work.
 //
 // Params:
-// 	- url (string): A server to connect to.
+// 	- url (string): A server to connect to. This runs through os.ExpandEnv().
 // 	- retries (int): Number of times to retry a connection to the server
 // 	- retrySleep (time.Duration): How long to sleep between retries
 //
@@ -66,12 +35,11 @@ type GetterSetter interface {
 // 	This puts an *etcd.Client into the context.
 func CreateClient(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
 	url := p.Get("url", "http://localhost:4001").(string)
+	url = os.ExpandEnv(url)
 
 	// Backed this out because it's unnecessary so far.
 	//hosts := p.Get("urls", []string{"http://localhost:4001"}).([]string)
 	hosts := []string{url}
-	retryCycles = p.Get("retries", retryCycles).(int)
-	retrySleep = p.Get("retrySleep", retrySleep).(time.Duration)
 
 	// Support `host:port` format, too.
 	for i, host := range hosts {
@@ -79,11 +47,11 @@ func CreateClient(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Inter
 			hosts[i] = "http://" + host
 		}
 	}
+	cfg := client.Config{
+		Endpoints: hosts,
+	}
 
-	client := etcd.NewClient(hosts)
-	client.CheckRetry = checkRetry
-
-	return client, nil
+	return client.New(cfg)
 }
 
 // Get performs an etcd Get operation.
@@ -91,6 +59,8 @@ func CreateClient(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Inter
 // Params:
 // 	- client (EtcdGetter): Etcd client
 // 	- path (string): The path/key to fetch
+// 	- recursive (bool): Get children, too. Default: false.
+// 	- sort (bool): Lexigraphically sort by name. Default: false.
 //
 // Returns:
 // - This puts an `etcd.Response` into the context, and returns an error
@@ -100,10 +70,13 @@ func Get(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
 	if !ok {
 		return nil, errors.New("No Etcd client found.")
 	}
-	client := cli.(Getter)
+	ec := cli.(client.Client)
 	path := p.Get("path", "/").(string)
+	rec := p.Get("recursive", false).(bool)
+	sort := p.Get("sort", false).(bool)
 
-	res, err := client.Get(path, false, false)
+	k := client.NewKeysAPI(ec)
+	res, err := k.Get(dctx(), path, &client.GetOptions{Sort: sort, Recursive: rec})
 	if err != nil {
 		return res, err
 	}
@@ -125,10 +98,11 @@ func Get(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
 // Returns:
 // 	boolean true if etcd is listening.
 func IsRunning(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
-	client := p.Get("client", nil).(Getter)
+	cli := p.Get("client", nil).(client.Client)
 	count := p.Get("count", 20).(int)
+	k := client.NewKeysAPI(cli)
 	for i := 0; i < count; i++ {
-		_, err := client.Get("/", false, false)
+		_, err := k.Get(dctx(), "/", &client.GetOptions{})
 		if err == nil {
 			return true, nil
 		}
@@ -153,9 +127,10 @@ func Set(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
 	key := p.Get("key", "").(string)
 	value := p.Get("value", "").(string)
 	ttl := p.Get("ttl", uint64(20)).(uint64)
-	client := p.Get("client", nil).(Setter)
+	cli := p.Get("client", nil).(client.Client)
 
-	res, err := client.Set(key, value, ttl)
+	k := client.NewKeysAPI(cli)
+	res, err := k.Set(dctx(), key, value, &client.SetOptions{TTL: time.Second * time.Duration(ttl)})
 	if err != nil {
 		log.Infof(c, "Failed to set %s=%s", key, value)
 		return res, err
@@ -176,10 +151,12 @@ func Set(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
 // Returns:
 // - username (string)
 func FindSSHUser(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
-	client := p.Get("client", nil).(Getter)
+	cli := p.Get("client", nil).(client.Client)
 	fingerprint := p.Get("fingerprint", nil).(string)
 
-	res, err := client.Get("/deis/builder/users", false, true)
+	k := client.NewKeysAPI(cli)
+
+	res, err := k.Get(dctx(), "/deis/builder/users", &client.GetOptions{Recursive: true})
 	if err != nil {
 		log.Warnf(c, "Error querying etcd: %s", err)
 		return "", err
@@ -216,21 +193,23 @@ func FindSSHUser(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interr
 //
 func StoreHostKeys(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
 	defaultCiphers := []string{"rsa", "dsa", "ecdsa", "ed25519"}
-	client := p.Get("client", nil).(GetterSetter)
+	//client := p.Get("client", nil).(GetterSetter)
+	cli := p.Get("client", nil).(client.Client)
 	ciphers := p.Get("ciphers", defaultCiphers).([]string)
 	basepath := p.Get("basepath", "/deis/builder").(string)
 
-	res, err := client.Get("sshHostKey", false, false)
+	k := client.NewKeysAPI(cli)
+	res, err := k.Get(dctx(), "sshHostKey", &client.GetOptions{})
 	if err != nil || res.Node == nil {
 		log.Infof(c, "Could not get SSH host key from etcd. Generating new ones.")
 		if err := genSSHKeys(c); err != nil {
 			log.Err(c, "Failed to generate SSH keys. Aborting.")
 			return nil, err
 		}
-		if err := keysToEtcd(c, client, ciphers, basepath); err != nil {
+		if err := keysToEtcd(c, k, ciphers, basepath); err != nil {
 			return nil, err
 		}
-	} else if err := keysToLocal(c, client, ciphers, basepath); err != nil {
+	} else if err := keysToLocal(c, k, ciphers, basepath); err != nil {
 		log.Infof(c, "Fetching SSH host keys from etcd.")
 		return nil, err
 	}
@@ -241,13 +220,13 @@ func StoreHostKeys(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Inte
 // keysToLocal copies SSH host keys from etcd to the local file system.
 //
 // This only fails if the main key, sshHostKey cannot be stored or retrieved.
-func keysToLocal(c cookoo.Context, client Getter, ciphers []string, etcdPath string) error {
+func keysToLocal(c cookoo.Context, k client.KeysAPI, ciphers []string, etcdPath string) error {
 	lpath := "/etc/ssh/ssh_host_%s_key"
 	privkey := "%s/sshHost%sKey"
 	for _, cipher := range ciphers {
 		path := fmt.Sprintf(lpath, cipher)
 		key := fmt.Sprintf(privkey, etcdPath, cipher)
-		res, err := client.Get(key, false, false)
+		res, err := k.Get(dctx(), key, &client.GetOptions{})
 		if err != nil || res.Node == nil {
 			continue
 		}
@@ -259,7 +238,7 @@ func keysToLocal(c cookoo.Context, client Getter, ciphers []string, etcdPath str
 	}
 
 	// Now get generic key.
-	res, err := client.Get("sshHostKey", false, false)
+	res, err := k.Get(dctx(), "sshHostKey", &client.GetOptions{})
 	if err != nil || res.Node == nil {
 		return fmt.Errorf("Failed to get sshHostKey from etcd. %v", err)
 	}
@@ -276,7 +255,7 @@ func keysToLocal(c cookoo.Context, client Getter, ciphers []string, etcdPath str
 //
 // It only fails if it cannot copy ssh_host_key to sshHostKey. All other
 // abnormal conditions are logged, but not considered to be failures.
-func keysToEtcd(c cookoo.Context, client Setter, ciphers []string, etcdPath string) error {
+func keysToEtcd(c cookoo.Context, k client.KeysAPI, ciphers []string, etcdPath string) error {
 	lpath := "/etc/ssh/ssh_host_%s_key"
 	privkey := "%s/sshHost%sKey"
 	for _, cipher := range ciphers {
@@ -285,7 +264,7 @@ func keysToEtcd(c cookoo.Context, client Setter, ciphers []string, etcdPath stri
 		content, err := ioutil.ReadFile(path)
 		if err != nil {
 			log.Infof(c, "No key named %s", path)
-		} else if _, err := client.Set(key, string(content), 0); err != nil {
+		} else if _, err := k.Set(dctx(), key, string(content), &client.SetOptions{}); err != nil {
 			log.Errf(c, "Could not store ssh key in etcd: %s", err)
 		}
 	}
@@ -293,7 +272,7 @@ func keysToEtcd(c cookoo.Context, client Setter, ciphers []string, etcdPath stri
 	if content, err := ioutil.ReadFile("/etc/ssh/ssh_host_key"); err != nil {
 		log.Errf(c, "Could not read the ssh_host_key file.")
 		return err
-	} else if _, err := client.Set("sshHostKey", string(content), 0); err != nil {
+	} else if _, err := k.Set(dctx(), "sshHostKey", string(content), &client.SetOptions{}); err != nil {
 		log.Errf(c, "Failed to set sshHostKey in etcd.")
 		return err
 	}
@@ -329,7 +308,7 @@ func UpdateHostPort(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Int
 	base := p.Get("base", "").(string)
 	host := p.Get("host", "").(string)
 	port := p.Get("port", "").(string)
-	client := p.Get("client", nil).(Setter)
+	cli := p.Get("client", nil).(client.Client)
 	sshd := p.Get("sshdPid", 0).(int)
 
 	// If no port is specified, we don't do anything.
@@ -338,9 +317,10 @@ func UpdateHostPort(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Int
 		return false, nil
 	}
 
-	var ttl uint64 = 20
+	ttl := time.Second * 20
+	k := client.NewKeysAPI(cli)
 
-	if err := setHostPort(client, base, host, port, ttl); err != nil {
+	if err := setHostPort(k, base, host, port, ttl); err != nil {
 		log.Errf(c, "Etcd error setting host/port: %s", err)
 		return false, err
 	}
@@ -354,7 +334,7 @@ func UpdateHostPort(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Int
 				log.Errf(c, "Lost SSHd process: %s", err)
 				break
 			} else {
-				if err := setHostPort(client, base, host, port, ttl); err != nil {
+				if err := setHostPort(k, base, host, port, ttl); err != nil {
 					log.Errf(c, "Etcd error setting host/port: %s", err)
 					break
 				}
@@ -366,11 +346,12 @@ func UpdateHostPort(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Int
 	return true, nil
 }
 
-func setHostPort(client Setter, base, host, port string, ttl uint64) error {
-	if _, err := client.Set(base+"/host", host, ttl); err != nil {
+func setHostPort(k client.KeysAPI, base, host, port string, ttl time.Duration) error {
+	o := client.SetOptions{TTL: ttl}
+	if _, err := k.Set(dctx(), base+"/host", host, &o); err != nil {
 		return err
 	}
-	if _, err := client.Set(base+"/port", port, ttl); err != nil {
+	if _, err := k.Set(dctx(), base+"/port", port, &o); err != nil {
 		return err
 	}
 	return nil
@@ -386,18 +367,17 @@ func setHostPort(client Setter, base, host, port string, ttl uint64) error {
 // 	*etcd.Response
 func MakeDir(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
 	name := p.Get("path", "").(string)
-	ttl := p.Get("ttl", uint64(0)).(uint64)
-	cli, ok := p.Has("client")
-	if !ok {
-		return nil, errors.New("No Etcd client found.")
-	}
-	client := cli.(DirCreator)
+	t := p.Get("ttl", uint64(0)).(uint64)
+	ttl := time.Duration(t) * time.Second
+
+	cli := p.Get("client", nil).(client.Client)
+	k := client.NewKeysAPI(cli)
 
 	if len(name) == 0 {
 		return false, errors.New("Expected directory name to be more than zero characters.")
 	}
 
-	res, err := client.CreateDir(name, ttl)
+	res, err := k.Set(dctx(), name, "", &client.SetOptions{TTL: ttl, Dir: true})
 	if err != nil {
 		return res, &cookoo.RecoverableError{err.Error()}
 	}
@@ -413,29 +393,22 @@ func MakeDir(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt)
 // Params:
 // - client (Watcher): An Etcd client.
 // - path (string): The path to watch
-//
-// Returns:
-// 	- chan bool: Send this a message to stop the watcher.
 func Watch(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
+
 	// etcdctl -C $ETCD watch --recursive /deis/services
 	path := p.Get("path", "/deis/services").(string)
-	cli, ok := p.Has("client")
-	if !ok {
-		return nil, errors.New("No etcd client found.")
-	}
-	client := cli.(Watcher)
+	cli := p.Get("client", nil).(client.Client)
+	k := client.NewKeysAPI(cli)
 
-	// Stupid hack because etcd watch seems to be broken, constantly complaining
-	// that the JSON it received is malformed.
+	watcher := k.Watcher(path, &client.WatcherOptions{Recursive: true})
+
 	safely.GoDo(c, func() {
 		for {
-			response, err := client.Watch(path, 0, true, nil, nil)
+			// TODO: We should probably add cancellation support.
+			response, err := watcher.Next(dctx())
 			if err != nil {
 				log.Errf(c, "Etcd Watch failed: %s", err)
-				time.Sleep(50 * time.Millisecond)
-				continue
 			}
-
 			if response.Node == nil {
 				log.Infof(c, "Unexpected Etcd message: %v", response)
 			}
@@ -445,82 +418,6 @@ func Watch(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
 				log.Infof(c, "Output: %s", out)
 			}
 		}
-
 	})
-
 	return nil, nil
-
-	/* Watch seems to be broken. So we do this stupid watch loop instead.
-	receiver := make(chan *etcd.Response)
-	stop := make(chan bool)
-	// Buffer the channels so that we don't hang waiting for go-etcd to
-	// read off the channel.
-	stopetcd := make(chan bool, 1)
-	stopwatch := make(chan bool, 1)
-
-
-	// Watch for errors.
-	safely.GoDo(c, func() {
-		// When a receiver is passed in, no *Response is ever returned. Instead,
-		// Watch acts like an error channel, and receiver gets all of the messages.
-		_, err := client.Watch(path, 0, true, receiver, stopetcd)
-		if err != nil {
-			log.Infof(c, "Watcher stopped with error '%s'", err)
-			stopwatch <- true
-			//close(stopwatch)
-		}
-	})
-	// Watch for events
-	safely.GoDo(c, func() {
-		for {
-			select {
-			case msg := <-receiver:
-				if msg.Node != nil {
-					log.Infof(c, "Received notification %s for %s", msg.Action, msg.Node.Key)
-				} else {
-					log.Infof(c, "Received unexpected etcd message: %v", msg)
-				}
-				git := exec.Command("/home/git/check-repos")
-				if out, err := git.CombinedOutput(); err != nil {
-					log.Errf(c, "Failed git check-repos: %s", err)
-					log.Infof(c, "Output: %s", out)
-				}
-			case <-stopwatch:
-				c.Logf("debug", "Received signal to stop watching events.")
-				return
-			}
-		}
-	})
-	// Fan out stop requests.
-	safely.GoDo(c, func() {
-		<-stop
-		stopwatch <- true
-		stopetcd <- true
-		close(stopwatch)
-		close(stopetcd)
-	})
-
-	return stop, nil
-	*/
-}
-
-// checkRetry overrides etcd.DefaultCheckRetry.
-//
-// It adds configurable number of retries and configurable timesouts.
-func checkRetry(c *etcd.Cluster, numReqs int, last http.Response, err error) error {
-	if numReqs > retryCycles*len(c.Machines) {
-		return fmt.Errorf("Tried and failed %d cluster connections: %s", retryCycles, err)
-	}
-
-	switch last.StatusCode {
-	case 0:
-		return nil
-	case 500:
-		time.Sleep(retrySleep)
-		return nil
-	case 200:
-		return nil
-	default:
-		return fmt.Errorf("Unhandled HTTP Error: %s %d", last.Status, last.StatusCode)
-	}
 }
