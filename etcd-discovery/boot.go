@@ -12,7 +12,10 @@ import (
 	"github.com/deis/deis/pkg/etcd/discovery"
 )
 
+var version = "DEV"
+
 func main() {
+	log.Printf("Starting etcd-discovery boot version %s", version)
 
 	ip, err := aboutme.MyIP()
 	if err != nil {
@@ -40,9 +43,9 @@ func main() {
 	}()
 
 	// Give etcd time to start up.
-	log.Print("Sleeping for 5 seconds...")
+	log.Print("Etcd needs to start. Sleeping for 5 seconds...")
 	time.Sleep(5 * time.Second)
-	log.Print("I'm awake.")
+	log.Print("Woke up.")
 
 	uuid, err := discovery.Token()
 	if err != nil {
@@ -60,7 +63,8 @@ func main() {
 		log.Printf("Failed to add key: %s", err)
 	}
 
-	log.Printf("The etcd-discovery service is now ready and waiting.")
+	log.Printf("etcd-discovery service secret is %s.", key)
+	log.Printf("etcd-discovery service is running on %s:%s.", ip, port)
 	if err := cmd.Wait(); err != nil {
 		log.Printf("Etcd stopped running: %s", err)
 	}

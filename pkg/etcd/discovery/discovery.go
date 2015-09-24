@@ -4,6 +4,8 @@ package discovery
 import (
 	"bytes"
 	"io/ioutil"
+
+	"github.com/Masterminds/cookoo"
 )
 
 const TokenFile = "/var/run/secrets/deis/etcd/discovery/token"
@@ -18,4 +20,11 @@ func Token() ([]byte, error) {
 	}
 	data = bytes.TrimSpace(data)
 	return data, nil
+}
+
+// GetToken is a command to get a token.
+//
+// This is a convenience for calling Token in a route.
+func GetToken(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
+	return Token()
 }

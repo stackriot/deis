@@ -3,6 +3,7 @@
 package etcd
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -52,6 +53,12 @@ func CreateClient(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Inter
 	}
 
 	return client.New(cfg)
+}
+
+// SimpleGet performs the common base-line get, using a default context.
+func SimpleGet(cli client.Client, key string, recursive bool) (*client.Response, error) {
+	k := client.NewKeysAPI(cli)
+	return k.Get(dctx(), key, &client.GetOptions{Recursive: recursive})
 }
 
 // Get performs an etcd Get operation.
@@ -420,4 +427,70 @@ func Watch(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
 		}
 	})
 	return nil, nil
+}
+
+// RemoveMemberByName removes a member whose name matches the given.
+//
+// Params:
+// 	- client(client.Client): An etcd client
+//	- name (string): The name to remove
+// Returns:
+//	true if the member was found, false otherwise.
+func RemoveMemberByName(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
+	cli := p.Get("client", nil).(client.Client)
+	name := p.Get("name", "____").(string)
+	mem := client.NewMembersAPI(cli)
+
+	members, err := mem.List(dctx())
+	if err != nil {
+		return false, err
+	}
+
+	remIDs := []string{}
+	for _, member := range members {
+		if member.Name == name {
+			log.Infof(c, "Removing member %s (ID: %s)", name, member.ID)
+			// If this is synchronizable, we should do it in parallel.
+			if err := mem.Remove(dctx(), member.ID); err != nil {
+				return len(remIDs) > 0, err
+			}
+			remIDs = append(remIDs, member.ID)
+		}
+	}
+
+	return len(remIDs) > 0, nil
+}
+
+// GetInitialCluster gets the initial cluster members.
+//
+// When adding a new node to a cluster, Etcd requires that you pass it
+// a list of initial members, in the form "MEMBERNAME=URL". This command
+// generates that list and puts it into the environment variable
+// ETCD_INITIAL_CLUSTER
+//
+// Params:
+// 	client (client.Client): An etcd client.
+// Returns:
+//  string representation of the list, also put into the enviornment.
+func GetInitialCluster(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
+	cli := p.Get("client", nil).(client.Client)
+	mem := client.NewMembersAPI(cli)
+
+	members, err := mem.List(dctx())
+	if err != nil {
+		return "", err
+	}
+
+	var b bytes.Buffer
+	for _, member := range members {
+		for _, purl := range member.PeerURLs {
+			b.WriteString(member.Name + "=" + purl)
+		}
+	}
+
+	ic := b.String()
+	log.Infof(c, "ETCD_INITIAL_CLUSTER=%s", ic)
+	os.Setenv("ETCD_INITIAL_CLUSTER", ic)
+	return ic, nil
+
 }

@@ -33,6 +33,10 @@
                   "image":"192.168.99.102:5000/deis/etcd:23",
                    "env":[
                      {
+                       "name": "DEIS_ETCD_CLUSTER_SIZE",
+                       "value": "3"
+                     },
+                     {
                        "name": "ETCD_NAME",
                        "value": "deis2"
                      }
