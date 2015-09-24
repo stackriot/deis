@@ -8,7 +8,8 @@ import (
 	"github.com/Masterminds/cookoo"
 )
 
-const TokenFile = "/var/run/secrets/deis/etcd/discovery/token"
+var TokenFile = "/var/run/secrets/deis/etcd/discovery/token"
+
 const ClusterDiscoveryURL = "http://%s:%s/v2/keys/deis/discovery/%s"
 const ClusterSizeKey = "deis/discovery/%s/_config/size"
 
@@ -26,5 +27,9 @@ func Token() ([]byte, error) {
 //
 // This is a convenience for calling Token in a route.
 func GetToken(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
-	return Token()
+	t, err := Token()
+	if err != nil {
+		return "", err
+	}
+	return string(t), err
 }
