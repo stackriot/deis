@@ -48,15 +48,10 @@ func routes(reg *cookoo.Registry) {
 					{Name: "DEIS_ETCD_DISCOVERY_SERVICE_HOST"},
 					{Name: "DEIS_ETCD_DISCOVERY_SERVICE_PORT"},
 					{Name: "DEIS_ETCD_1_SERVICE_HOST"},
-					{Name: "DEIS_ETCD_2_SERVICE_HOST"},
-					{Name: "DEIS_ETCD_3_SERVICE_HOST"},
 					{Name: "DEIS_ETCD_1_SERVICE_PORT_CLIENT"},
-					{Name: "DEIS_ETCD_2_SERVICE_PORT_CLIENT"},
-					{Name: "DEIS_ETCD_3_SERVICE_PORT_CLIENT"},
-					{Name: "HOSTNAME"},
-
 					{Name: "DEIS_ETCD_CLUSTER_SIZE", DefaultValue: "3"},
 					{Name: "DEIS_ETCD_DISCOVERY_TOKEN", From: "cxt:discoveryToken"},
+					{Name: "HOSTNAME"},
 
 					// This should be set in Kubernetes environment.
 					{Name: "ETCD_NAME", DefaultValue: "deis1"},
@@ -66,17 +61,6 @@ func routes(reg *cookoo.Registry) {
 					{Name: "ETCD_LISTEN_PEER_URLS", DefaultValue: "http://$MY_IP:$MY_PORT_PEER"},
 					{Name: "ETCD_INITIAL_ADVERTISE_PEER_URLS", DefaultValue: "http://$MY_IP:$MY_PORT_PEER"},
 
-					// This is for static cluster. Delete if we go with discovery.
-					/*
-						{
-							Name:         "ETCD_INITIAL_CLUSTER",
-							DefaultValue: "deis1=http://$DEIS_ETCD_1_SERVICE_HOST:$DEIS_ETCD_1_SERVICE_PORT_PEER,deis2=http://$DEIS_ETCD_2_SERVICE_HOST:$DEIS_ETCD_2_SERVICE_PORT_PEER,deis3=http://$DEIS_ETCD_3_SERVICE_HOST:$DEIS_ETCD_3_SERVICE_PORT_PEER",
-						},
-						{Name: "ETCD_INITIAL_CLUSTER_STATE", DefaultValue: "new"},
-						{Name: "ETCD_INTIIAL_CLUSTER_TOKEN", DefaultValue: "c0ff33"},
-					*/
-
-					// These point to service addresses.
 					{
 						Name:         "ETCD_LISTEN_CLIENT_URLS",
 						DefaultValue: "http://$MY_IP:$MY_PORT_CLIENT,http://127.0.0.1:$MY_PORT_CLIENT",
@@ -106,17 +90,7 @@ func routes(reg *cookoo.Registry) {
 				Using: []cookoo.Param{
 					{
 						Name:         "url",
-						DefaultValue: "http://$DEIS_ETCD_1_SERVICE_HOST:$DEIS_ETCD_1_SERVICE_PORT",
-					},
-				},
-			},
-			cookoo.Cmd{
-				Name: "vars2",
-				Fn:   env.Get,
-				Using: []cookoo.Param{
-					{
-						Name:         "ETCD_DISCOVERY",
-						DefaultValue: "http://$DEIS_ETCD_DISCOVERY_SERVICE_HOST:$DEIS_ETCD_DISCOVERY_SERVICE_PORT/v2/keys/deis/discovery/$DEIS_ETCD_DISCOVERY_TOKEN",
+						DefaultValue: "http://$DEIS_ETCD_1_SERVICE_HOST:$DEIS_ETCD_1_SERVICE_PORT_CLIENT",
 					},
 				},
 			},
@@ -137,6 +111,8 @@ func routes(reg *cookoo.Registry) {
 				Fn: func(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
 					if m := p.Get("joinMode", "").(string); m == "new" {
 						return nil, cookoo.NewReroute("@newCluster")
+					} else {
+						log.Infof(c, "Join mode is %s", m)
 					}
 					return nil, nil
 				},
@@ -152,6 +128,7 @@ func routes(reg *cookoo.Registry) {
 					{Name: "name", From: "cxt:HOSTNAME"},
 				},
 			},
+
 			cookoo.Cmd{
 				Name: "initialCluster",
 				Fn:   etcd.GetInitialCluster,
@@ -159,23 +136,6 @@ func routes(reg *cookoo.Registry) {
 					{Name: "client", From: "cxt:clusterClient"},
 				},
 			},
-			// TODO: Get ETCD_INITIAL_CLUSTER
-			/*
-				What we need to do here:
-				- First, we need to check the discovery service to find out if
-				  it is full.
-				  - If the discovery service is not full, we set etcd into discovery
-				    mode and let it join via the service.
-				  - If it IS FULL, then we need to do several things:
-				    - We need to get the service URL for etcd
-					- We need to contact that URL and find out if our host name
-					  is a member there.
-					- If this name is already a member, remove the member.
-					- Put self into joining mode, and give it as much of the
-					  cluster as it can find
-				- Start etcd
-			*/
-
 			cookoo.Cmd{
 				Name: "startEtcd",
 				Fn:   startEtcd,
@@ -186,10 +146,24 @@ func routes(reg *cookoo.Registry) {
 		},
 	})
 
+	// This route gets called if boot gets part way through and discovers
+	// that this is a new cluster. This short-circuits around the logic
+	// that tries to detect a cluster and manage membership, and skips straight
+	// to discovery via etcd-discovery.
 	reg.AddRoute(cookoo.Route{
 		Name: "@newCluster",
 		Help: "Start as part of a new cluster",
 		Does: []cookoo.Task{
+			cookoo.Cmd{
+				Name: "vars2",
+				Fn:   env.Get,
+				Using: []cookoo.Param{
+					{
+						Name:         "ETCD_DISCOVERY",
+						DefaultValue: "http://$DEIS_ETCD_DISCOVERY_SERVICE_HOST:$DEIS_ETCD_DISCOVERY_SERVICE_PORT/v2/keys/deis/discovery/$DEIS_ETCD_DISCOVERY_TOKEN",
+					},
+				},
+			},
 			cookoo.Cmd{
 				Name: "startEtcd",
 				Fn:   startEtcd,

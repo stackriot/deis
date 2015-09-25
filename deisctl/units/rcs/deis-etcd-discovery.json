@@ -30,7 +30,7 @@
             "containers":[
                {
                   "name":"deis-etcd-discovery-rc",
-                  "image":"192.168.99.100:5000/deis/etcd-discovery:v1.10.0-104-gff87a00",
+                  "image":"192.168.99.100:5000/deis/etcd-discovery:v1.10.0-109-g6cce2de",
                   "ports": [
                     {
                       "containerPort":2381

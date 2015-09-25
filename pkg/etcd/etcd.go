@@ -3,7 +3,6 @@
 package etcd
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -22,6 +21,7 @@ import (
 
 // dctx returns a default context for simpleEtcdClient.
 func dctx() context.Context {
+	// TODO: Add a sensible timeout. 20 seconds? 5 seconds?
 	return context.Background()
 }
 
@@ -51,6 +51,8 @@ func CreateClient(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Inter
 	cfg := client.Config{
 		Endpoints: hosts,
 	}
+
+	log.Infof(c, "Client configured for Etcd servers '%s'", strings.Join(hosts, ","))
 
 	return client.New(cfg)
 }
@@ -443,6 +445,7 @@ func RemoveMemberByName(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo
 
 	members, err := mem.List(dctx())
 	if err != nil {
+		log.Errf(c, "Could not get a list of members: %s", err)
 		return false, err
 	}
 
@@ -452,6 +455,7 @@ func RemoveMemberByName(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo
 			log.Infof(c, "Removing member %s (ID: %s)", name, member.ID)
 			// If this is synchronizable, we should do it in parallel.
 			if err := mem.Remove(dctx(), member.ID); err != nil {
+				log.Errf(c, "Failed to remove member: %s", err)
 				return len(remIDs) > 0, err
 			}
 			remIDs = append(remIDs, member.ID)
@@ -481,14 +485,14 @@ func GetInitialCluster(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.
 		return "", err
 	}
 
-	var b bytes.Buffer
+	b := []string{}
 	for _, member := range members {
 		for _, purl := range member.PeerURLs {
-			b.WriteString(member.Name + "=" + purl)
+			b = append(b, member.Name+"="+purl)
 		}
 	}
 
-	ic := b.String()
+	ic := strings.Join(b, ",")
 	log.Infof(c, "ETCD_INITIAL_CLUSTER=%s", ic)
 	os.Setenv("ETCD_INITIAL_CLUSTER", ic)
 	return ic, nil
