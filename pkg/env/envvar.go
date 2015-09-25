@@ -33,7 +33,7 @@ func Get(c cookoo.Context, params *cookoo.Params) (interface{}, cookoo.Interrupt
 			}
 			def, ok := def.(string)
 			if !ok {
-				log.Warnf(c, "Could not convert %s. Type is %T", val, def)
+				log.Warnf(c, "Could not convert %s. Type is %T", name, def)
 			}
 			val = os.ExpandEnv(def)
 			// We want to make sure that any subsequent calls to Getenv
