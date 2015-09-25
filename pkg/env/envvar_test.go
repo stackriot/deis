@@ -55,6 +55,38 @@ func TestGet(t *testing.T) {
 	}
 }
 
+func TestSet(t *testing.T) {
+	reg, router, cxt := cookoo.Cookoo()
+
+	os.Setenv("SLURM", "COFFEE")
+
+	reg.Route("test", "Test route").
+		Does(Set, "res").
+		Using("HELLO").WithDefault("hello").
+		Using("EMPTY").WithDefault(nil).
+		Using("FAVORITE_DRINK").WithDefault("$SLURM")
+
+	if err := router.HandleRequest("test", cxt, true); err != nil {
+		t.Error(err)
+	}
+
+	expect := map[string]string{
+		"HELLO":          "hello",
+		"EMPTY":          "",
+		"FAVORITE_DRINK": "COFFEE",
+	}
+
+	for k, v := range expect {
+		if v != os.Getenv(k) {
+			t.Errorf("Expected env var %s to be '%s', got '%s'", k, v, os.Getenv(k))
+		}
+		if cv := cxt.Get(k, "___").(string); cv != v {
+			t.Errorf("Expected context var %s to be '%s', got '%s'", k, v, cv)
+		}
+	}
+
+}
+
 // TestGetInterpolation is a regression test to make sure that values are
 // interpolated correctly.
 func TestGetInterpolation(t *testing.T) {

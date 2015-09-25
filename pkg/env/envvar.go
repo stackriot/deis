@@ -1,9 +1,11 @@
 package env
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/Masterminds/cookoo"
 	"github.com/Masterminds/cookoo/log"
-	"os"
 )
 
 // Get gets one or more environment variables and puts them into the context.
@@ -60,4 +62,39 @@ func Expand(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) 
 	// TODO: We could easily add support here for Expand().
 
 	return os.ExpandEnv(s), nil
+}
+
+// Set takes the given names and values and puts them into both the context
+// and the environment.
+//
+// Unlike Get, it does not try to retrieve the values from the environment
+// first.
+//
+// Values are passed through os.ExpandEnv()
+//
+// There is no guarantee of insertion order. If multiple name/value pairs
+// are given, they will be put into the context in whatever order they
+// are retrieved from the underlying map.
+//
+// Params:
+//   accessed as map[string]string
+// Returns:
+//   nothing, but inserts all name/value pairs into the context and the
+//   environment.
+func Set(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
+	for name, def := range p.AsMap() {
+		// Assume Nil means unset the value.
+		if def == nil {
+			def = ""
+		}
+
+		val := fmt.Sprintf("%v", def)
+		val = os.ExpandEnv(val)
+		log.Debugf(c, "Name: %s, Val: %s", name, val)
+
+		os.Setenv(name, val)
+		c.Put(name, val)
+	}
+	return true, nil
+
 }
