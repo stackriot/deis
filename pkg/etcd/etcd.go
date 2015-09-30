@@ -58,6 +58,8 @@ func CreateClient(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Inter
 }
 
 // SimpleGet performs the common base-line get, using a default context.
+//
+// This can be used in cases where no special contextual concerns apply.
 func SimpleGet(cli client.Client, key string, recursive bool) (*client.Response, error) {
 	k := client.NewKeysAPI(cli)
 	return k.Get(dctx(), key, &client.GetOptions{Recursive: recursive})
@@ -429,6 +431,36 @@ func Watch(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
 		}
 	})
 	return nil, nil
+}
+
+// AddMember Add a new member to the cluster.
+//
+// Conceptually, this is equivalent to `etcdctl member add NAME IP`.
+//
+// Params:
+// 	- client(client.Client): An etcd client
+// 	- name (string): The name of the member to add.
+// 	- addr (string): The peer ip:port or domain: port to use.
+//
+// Returns:
+//	An etcd *client.Member.
+func AddMember(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
+	cli := p.Get("client", nil).(client.Client)
+	name := p.Get("name", "default").(string)
+	ip := p.Get("ip", "127.0.0.1:2380").(string)
+	mem := client.NewMembersAPI(cli)
+
+	member, err := mem.Add(dctx(), ip)
+	if err != nil {
+		log.Errf(c, "Failed to add %s to cluster: %s", ip, err)
+		return nil, err
+	}
+
+	log.Infof(c, "Added %s (%s) to cluster", ip, member.ID)
+
+	member.Name = name
+
+	return member, nil
 }
 
 // RemoveMemberByName removes a member whose name matches the given.
