@@ -440,23 +440,23 @@ func Watch(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
 // Params:
 // 	- client(client.Client): An etcd client
 // 	- name (string): The name of the member to add.
-// 	- addr (string): The peer ip:port or domain: port to use.
+// 	- url (string): The peer ip:port or domain: port to use.
 //
 // Returns:
 //	An etcd *client.Member.
 func AddMember(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
 	cli := p.Get("client", nil).(client.Client)
 	name := p.Get("name", "default").(string)
-	ip := p.Get("ip", "127.0.0.1:2380").(string)
+	addr := p.Get("url", "127.0.0.1:2380").(string)
 	mem := client.NewMembersAPI(cli)
 
-	member, err := mem.Add(dctx(), ip)
+	member, err := mem.Add(dctx(), addr)
 	if err != nil {
-		log.Errf(c, "Failed to add %s to cluster: %s", ip, err)
+		log.Errf(c, "Failed to add %s to cluster: %s", addr, err)
 		return nil, err
 	}
 
-	log.Infof(c, "Added %s (%s) to cluster", ip, member.ID)
+	log.Infof(c, "Added %s (%s) to cluster", addr, member.ID)
 
 	member.Name = name
 
