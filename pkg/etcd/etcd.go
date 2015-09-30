@@ -520,6 +520,9 @@ func GetInitialCluster(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.
 	b := []string{}
 	for _, member := range members {
 		for _, purl := range member.PeerURLs {
+			if member.Name == "" {
+				member.Name = os.Getenv("HOSTNAME")
+			}
 			b = append(b, member.Name+"="+purl)
 		}
 	}
