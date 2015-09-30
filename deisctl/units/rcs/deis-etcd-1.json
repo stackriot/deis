@@ -8,7 +8,7 @@
       }
    },
    "spec":{
-      "replicas":1,
+      "replicas":3,
       "selector":{
          "name":"deis-etcd-1"
       },
@@ -30,7 +30,7 @@
             "containers":[
                {
                   "name":"deis-etcd-1",
-                  "image":"192.168.99.100:5000/deis/etcd:v1.10.0-109-g6cce2de",
+                  "image":"192.168.99.100:5000/deis/etcd:v1.10.0-110-gd299fcb",
                    "env":[
                      {
                        "name": "DEIS_ETCD_CLUSTER_SIZE",
