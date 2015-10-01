@@ -21,6 +21,7 @@ IMAGE := ${DEIS_REGISTRY}/deis/etcd-discovery:${VERSION}
 RC := "${DEISCTL_UNITS}/rcs/deis-etcd-discovery.json"
 
 build:
+	@mkdir -p ${BINDIR}
 	go build -o ${BINDIR}/boot -a -installsuffix cgo -ldflags ${LDFLAGS}  boot.go
 
 info:
@@ -48,6 +49,10 @@ kube-rc:
 	@# we want to find broken versions, too.
 	perl -pi -e "s|[a-z0-9.:]+\/deis\/etcd-discovery:[0-9a-z-.]+|${IMAGE}|g" ${RC}
 	kubectl create -f ${RC}
+
+kube-update:
+	perl -pi -e "s|[a-z0-9.:]+\/deis\/etcd-discovery:[0-9a-z-.]+|${IMAGE}|g" ${RC}
+	kubectl update -f ${RC}
 
 kube-service:
 	-kubectl create -f ${DEISCTL_UNITS}/secrets/deis-etcd-discovery-token.json
