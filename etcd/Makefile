@@ -49,6 +49,10 @@ kube-rc:
 	perl -pi -e "s|[a-z0-9.:]+\/deis\/etcd:[0-9a-z-.]+|${IMAGE}|g" ${RC}
 	kubectl create -f ${RC}
 
+kube-update:
+	perl -pi -e "s|[a-z0-9.:]+\/deis\/etcd:[0-9a-z-.]+|${IMAGE}|g" ${RC}
+	kubectl update -f ${RC}
+
 kube-service:
 	-kubectl create -f ${DEISCTL_UNITS}/services/deis-etcd-1-service.json
 	-kubectl create -f ${DEISCTL_UNITS}/services/deis-etcd-2-service.json

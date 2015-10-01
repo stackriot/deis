@@ -129,6 +129,27 @@ func routes(reg *cookoo.Registry) {
 				},
 			},
 
+			// Experimental: Remove any members whose pods have been destroyed.
+			cookoo.Cmd{
+				Name: "removeStale",
+				Fn:   etcd.RemoveStaleMembers,
+				Using: []cookoo.Param{
+					{Name: "client", From: "cxt:clusterClient"},
+					{Name: "namespace", From: "cxt:MY_NAMESPACE", DefaultValue: "default"},
+					{Name: "label", DefaultValue: "name=deis-etcd-1"},
+				},
+			},
+
+			cookoo.Cmd{
+				Name: "addMember",
+				Fn:   etcd.AddMember,
+				Using: []cookoo.Param{
+					{Name: "client", From: "cxt:clusterClient"},
+					{Name: "name", From: "cxt:HOSTNAME"},
+					{Name: "url", From: "cxt:ETCD_INITIAL_ADVERTISE_PEER_URLS"},
+				},
+			},
+
 			cookoo.Cmd{
 				Name: "initialCluster",
 				Fn:   etcd.GetInitialCluster,
