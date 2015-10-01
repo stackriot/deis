@@ -15,6 +15,10 @@ import (
 	"github.com/Masterminds/cookoo/log"
 	"github.com/Masterminds/cookoo/safely"
 	"github.com/coreos/etcd/client"
+	"github.com/deis/deis/pkg/k8s"
+
+	//"k8s.io/kubernetes/pkg/client/unversioned"
+	"k8s.io/kubernetes/pkg/labels"
 
 	"golang.org/x/net/context"
 )
@@ -495,6 +499,85 @@ func RemoveMemberByName(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo
 	}
 
 	return len(remIDs) > 0, nil
+}
+
+// RemoveStaleMembers deletes cluster members whose pods are no longer running.
+//
+// This queries Kubernetes to determine what etcd pods are running, and then
+// compares that to the member list in the etcd cluster. It removes any
+// cluster members who are no longer in the pod list.
+//
+// The purpose of this is to keep the cluster membership from deadlocking
+// when inactive members prevent consensus building.
+//
+// Params:
+//	- client (etcd/client.Client): The etcd client
+// 	- label (string): The pod label indicating an etcd node
+// 	- namespace (string): The namespace we're operating in
+// Returns:
+//
+func RemoveStaleMembers(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
+	eclient := p.Get("client", nil).(client.Client)
+	label := p.Get("label", "name=deis-etcd-1").(string)
+	ns := p.Get("namespace", "default").(string)
+
+	// Should probably pass in the client from the context.
+	klient, err := k8s.PodClient()
+	if err != nil {
+		log.Errf(c, "Could not create a Kubernetes client: %s", err)
+		return nil, err
+	}
+
+	mapi := client.NewMembersAPI(eclient)
+
+	members := map[string]bool{}
+	idmap := map[string]string{}
+
+	// Get members from etcd
+	mm, err := mapi.List(dctx())
+	if err != nil {
+		log.Warnf(c, "Could not get a list of etcd members: %s", err)
+		return nil, err
+	}
+	for _, member := range mm {
+		members[member.Name] = false
+		idmap[member.Name] = member.ID
+	}
+
+	// Get the pods running with the given label
+
+	labelSelector, err := labels.Parse(label)
+	if err != nil {
+		log.Errf(c, "Selector failed to parse: %s", err)
+		return nil, err
+	}
+	pods, err := klient.Pods(ns).List(labelSelector, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, item := range pods.Items {
+		if _, ok := members[item.Name]; !ok {
+			log.Infof(c, "Etcd pod %s is not in cluster yet.", item.Name)
+		} else {
+			members[item.Name] = true
+		}
+	}
+
+	// Anything marked false in members should be removed from etcd.
+	deleted := 0
+	for k, v := range members {
+		if !v {
+			log.Infof(c, "Deleting %s (%s) from etcd cluster members", k, idmap[k])
+			if err := mapi.Remove(dctx(), idmap[k]); err != nil {
+				log.Errf(c, "Failed to remove %s from cluster. Skipping. %s", k, err)
+			} else {
+				deleted++
+			}
+		}
+	}
+
+	return deleted, nil
 }
 
 // GetInitialCluster gets the initial cluster members.
