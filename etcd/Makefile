@@ -55,8 +55,6 @@ kube-update:
 
 kube-service:
 	-kubectl create -f ${DEISCTL_UNITS}/services/deis-etcd-1-service.json
-	-kubectl create -f ${DEISCTL_UNITS}/services/deis-etcd-2-service.json
-	-kubectl create -f ${DEISCTL_UNITS}/services/deis-etcd-3-service.json
 
 test:
 	@echo "TODO: This should start a Docker container and run tests in it."
