@@ -1,49 +1,60 @@
 {
-   "kind":"ReplicationController",
-   "apiVersion":"v1",
-   "metadata":{
-      "name":"deis-database",
-      "labels":{
-         "name":"deis-database"
-      }
-   },
-   "spec":{
-      "replicas":1,
-      "selector":{
-         "name":"deis-database"
+  "kind": "ReplicationController",
+  "apiVersion": "v1",
+  "metadata":{
+    "name": "deis-database",
+    "labels": {
+      "name": "deis-database"
+    }
+  },
+  "spec": {
+    "replicas": 2,
+    "selector": {
+      "name": "deis-database"
+    },
+    "template": {
+      "metadata": {
+          "labels": {
+            "name": "deis-database"
+          }
       },
-      "template":{
-         "metadata":{
-            "labels":{
-               "name":"deis-database"
-            }
-         },
-         "spec":{
-            "containers":[
-               {
-                  "name":"deis-database",
-                  "image":"registry.smothiki.io:5000/deis/database:git-31d2adb",
-                   "env":[
-                     {
-                       "name" : "HOST",
-                       "value" : "10.240.3.1"
-                     }
-                   ],
-                   "volumeMounts": [
-                      {
-                        "name": "postgresql",
-                        "mountPath": "/var/lib/postgresql"
-                      }
-                    ]
-               }
-            ],
-            "volumes":[
+      "spec": {
+        "containers": [
+          {
+            "name": "deis-database",
+            "image": "192.168.0.19:5000/deis/database:git-3c0f1e3",
+            "env": [
               {
-                "name": "postgresql",
-                "emptyDir": {}
+                "name" : "AWS_ACCESS_KEY_ID",
+                "value" : "AKIAIREDVEIOJVZDY25Q"
+              },
+              {
+                "name" : "AWS_SECRET_ACCESS_KEY",
+                "value" : "Ivc0Q5zqSQBmi16S/J2GIz7QNf4HOqqCG3/JiikH"
+              },
+              {
+                "name" : "WALE_S3_PREFIX",
+                "value" : "s3://bacongobbler"
               }
-            ]
-         }
+            ],
+            "ports": [
+              {
+                "name": "db-port",
+                "containerPort": 5432
+              }
+            ],
+            "readinessProbe": {
+              "exec": {
+                "command": [
+                  "is_master"
+                ]
+              },
+              "initialDelaySeconds": 0,
+              "timeoutSeconds": 0
+            }
+          }
+        ]
       }
-   }
+    }
+  }
 }

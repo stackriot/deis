@@ -1,23 +1,34 @@
-FROM alpine:3.1
+FROM postgres:9.4
 
-# install common packages
-RUN apk add --update-cache curl bash sudo && rm -rf /var/cache/apk/*
+RUN apt-get update && apt-get install -y \
+    curl \
+    gcc \
+    libpq-dev \
+    libyaml-dev \
+    lzop \
+    pv \
+    python \
+    python-dev \
+    python-pip \
+    --no-install-recommends \
+    && rm -rf /var/cache/apt/*
 
-# install etcdctl
-RUN curl -sSL -o /usr/local/bin/etcdctl https://s3-us-west-2.amazonaws.com/get-deis/etcdctl-v0.4.9 \
-    && chmod +x /usr/local/bin/etcdctl
+# add backup dir
+RUN mkdir -p /var/cache/postgresql/backups
+RUN chown -R postgres:postgres /var/cache/postgresql/backups
 
-# install confd
-RUN curl -sSL -o /usr/local/bin/confd https://github.com/kelseyhightower/confd/releases/download/v0.10.0/confd-0.10.0-linux-amd64 \
-    && chmod +x /usr/local/bin/confd
+COPY rootfs /
 
-ADD build.sh /tmp/build.sh
-RUN DOCKER_BUILD=true /tmp/build.sh
+RUN chown -R postgres:postgres /app
 
-# define the execution environment
 WORKDIR /app
-CMD ["/app/bin/boot"]
-EXPOSE 5432
-ADD . /app
 
-ENV DEIS_RELEASE 1.11.0-dev
+RUN pip install -r requirements.txt
+
+USER postgres
+
+RUN mkdir data
+
+CMD ["python", "governor.py", "postgres.yml"]
+
+ENV DEIS_RELEASE 2.0.0-dev
