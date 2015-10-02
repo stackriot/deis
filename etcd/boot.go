@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
@@ -53,9 +52,6 @@ func routes(reg *cookoo.Registry) {
 					{Name: "DEIS_ETCD_DISCOVERY_TOKEN", From: "cxt:discoveryToken"},
 					{Name: "HOSTNAME"},
 
-					// This should be set in Kubernetes environment.
-					{Name: "ETCD_NAME", DefaultValue: "deis1"},
-
 					// Peer URLs are for traffic between etcd nodes.
 					// These point to internal IP addresses, not service addresses.
 					{Name: "ETCD_LISTEN_PEER_URLS", DefaultValue: "http://$MY_IP:$MY_PORT_PEER"},
@@ -94,6 +90,9 @@ func routes(reg *cookoo.Registry) {
 					},
 				},
 			},
+
+			// If there is an existing cluster, set join mode to "existing",
+			// Otherwise this gets set to "new".
 			cookoo.Cmd{
 				Name: "joinMode",
 				Fn:   setJoinMode,
@@ -120,6 +119,10 @@ func routes(reg *cookoo.Registry) {
 					{Name: "joinMode", From: "cxt:joinMode"},
 				},
 			},
+
+			// If we didn't get rerouted by the last command, we're in an
+			// existing cluster, and we need to do some cleanup. First thing is
+			// to remove any previous copies of this pod.
 			cookoo.Cmd{
 				Name: "removeMember",
 				Fn:   etcd.RemoveMemberByName,
@@ -129,7 +132,10 @@ func routes(reg *cookoo.Registry) {
 				},
 			},
 
-			// Experimental: Remove any members whose pods have been destroyed.
+			// If any other etcd cluster members are gone (pod does not exist)
+			// then we need to remove them from the cluster or else they will
+			// remain voting members in the master election, and can eventually
+			// deadlock the cluster.
 			cookoo.Cmd{
 				Name: "removeStale",
 				Fn:   etcd.RemoveStaleMembers,
@@ -140,6 +146,7 @@ func routes(reg *cookoo.Registry) {
 				},
 			},
 
+			// Now add self to cluster.
 			cookoo.Cmd{
 				Name: "addMember",
 				Fn:   etcd.AddMember,
@@ -150,6 +157,7 @@ func routes(reg *cookoo.Registry) {
 				},
 			},
 
+			// Find out who is in the cluster.
 			cookoo.Cmd{
 				Name: "initialCluster",
 				Fn:   etcd.GetInitialCluster,
@@ -157,6 +165,10 @@ func routes(reg *cookoo.Registry) {
 					{Name: "client", From: "cxt:clusterClient"},
 				},
 			},
+
+			// Start etcd. Note that we use environment variables to pass
+			// info into etcd, which is why there is so much env munging
+			// in this startup script.
 			cookoo.Cmd{
 				Name: "startEtcd",
 				Fn:   startEtcd,
@@ -242,43 +254,34 @@ func setJoinMode(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interr
 
 // iam injects info into the environment about a host's self.
 //
-// Sets the following environment variables:
+// Sets the following environment variables. (Values represent the data format.
+// Instances will get its own values.)
 //
-//	MY_IP
-//	MY_SERVICE_IP
-// 	MY_PORT_PEER
-// 	MY_PORT_CLIENT
+//	MY_NODEIP=10.245.1.3
+//	MY_SERVICE_IP=10.22.1.4
+// 	MY_PORT_PEER=2380
+// 	MY_PORT_CLIENT=2379
+//	MY_NAMESPACE=default
+//	MY_SELFLINK=/api/v1/namespaces/default/pods/deis-etcd-1-336jp
+//	MY_UID=62a3b54a-6956-11e5-b8ab-0800279dd272
+//	MY_APISERVER=https://10.247.0.1:443
+//	MY_NAME=deis-etcd-1-336jp
+//	MY_IP=10.246.44.7
+//	MY_LABEL_NAME=deis-etcd-1   # One entry per label in the JSON
+// 	MY_ANNOTATION_NAME=deis-etcd-1  # One entry per annitation in the JSON
+//	MY_PORT_CLIENT=4100
+//	MY_PORT_PEER=2380
 func iam(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
-	name := os.Getenv("ETCD_NAME")
-	ip, err := aboutme.MyIP()
+	me, err := aboutme.FromEnv()
 	if err != nil {
-		return nil, err
-	}
-	os.Setenv("MY_IP", ip)
-	os.Setenv("ETCD_NAME", os.Getenv("HOSTNAME"))
-
-	// TODO: Swap this with a regexp once the final naming convention has
-	// been decided.
-	var index int
-	switch name {
-	case "deis1":
-		index = 1
-	case "deis2":
-		index = 2
-	case "deis3":
-		index = 3
-	default:
-		log.Info(c, "Can't get $ETCD_NAME. Initializing defaults.")
-		os.Setenv("MY_IP", ip)
-		os.Setenv("MY_SERVICE_IP", "127.0.0.1")
-		os.Setenv("MY_PORT_PEER", "2380")
-		os.Setenv("MY_PORT_CLIENT", "4100")
-		return nil, nil
+		log.Errf(c, "Failed aboutme.FromEnv: %s", err)
+	} else {
+		me.ShuntEnv()
+		os.Setenv("ETCD_NAME", me.Name)
 	}
 
-	passEnv("MY_SERVICE_IP", fmt.Sprintf("$DEIS_ETCD_%d_SERVICE_HOST", index))
-	passEnv("MY_PORT_CLIENT", fmt.Sprintf("$DEIS_ETCD_%d_SERVICE_PORT_CLIENT", index))
-	passEnv("MY_PORT_PEER", fmt.Sprintf("$DEIS_ETCD_%d_SERVICE_PORT_PEER", index))
+	passEnv("MY_PORT_CLIENT", "$DEIS_ETCD_1_SERVICE_PORT_CLIENT")
+	passEnv("MY_PORT_PEER", "$DEIS_ETCD_1_SERVICE_PORT_PEER")
 	return nil, nil
 }
 
