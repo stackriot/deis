@@ -4,7 +4,8 @@
    "metadata":{
       "name":"ceph-gtw",
       "labels":{
-         "name":"ceph-gtw"
+         "name":"ceph-gtw",
+         "provides": "deis-object-storage"
       }
    },
    "spec":{

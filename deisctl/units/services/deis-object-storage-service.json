@@ -2,21 +2,21 @@
    "kind":"Service",
    "apiVersion":"v1",
    "metadata":{
-      "name":"ceph-gtw",
+      "name":"deis-object-storage",
       "labels":{
-         "name":"ceph-gtw"
+         "name":"deis-object-storage"
       }
    },
    "spec":{
       "ports": [
         {
+          "name": "http",
           "port":8888,
-          "targetPort":8888,
           "protocol":"TCP"
         }
       ],
       "selector":{
-         "name":"ceph-gtw"
+         "provides":"deis-object-storage"
       }
    }
 }
