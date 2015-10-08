@@ -22,19 +22,19 @@
         "containers": [
           {
             "name": "deis-database",
-            "image": "192.168.0.19:5000/deis/database:git-3c0f1e3",
+            "image": "192.168.0.19:5000/deis/database:git-b5d3017",
             "env": [
               {
                 "name" : "AWS_ACCESS_KEY_ID",
-                "value" : "AKIAIREDVEIOJVZDY25Q"
+                "value" : "CHANGEME"
               },
               {
                 "name" : "AWS_SECRET_ACCESS_KEY",
-                "value" : "Ivc0Q5zqSQBmi16S/J2GIz7QNf4HOqqCG3/JiikH"
+                "value" : "CHANGEME"
               },
               {
                 "name" : "WALE_S3_PREFIX",
-                "value" : "s3://bacongobbler"
+                "value" : "s3://deis"
               }
             ],
             "ports": [
