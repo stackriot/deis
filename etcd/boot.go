@@ -2,10 +2,12 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Masterminds/cookoo"
 	"github.com/Masterminds/cookoo/log"
@@ -92,13 +94,16 @@ func routes(reg *cookoo.Registry) {
 			},
 
 			// If there is an existing cluster, set join mode to "existing",
-			// Otherwise this gets set to "new".
+			// Otherwise this gets set to "new". Note that we check the
+			// 'status' directory on the discovery service. If the discovery
+			// service is down, we will bail out, which will force a pod
+			// restart.
 			cookoo.Cmd{
 				Name: "joinMode",
 				Fn:   setJoinMode,
 				Using: []cookoo.Param{
 					{Name: "client", From: "cxt:discoveryClient"},
-					{Name: "path", DefaultValue: "/deis/discovery/$DEIS_ETCD_DISCOVERY_TOKEN"},
+					{Name: "path", DefaultValue: "/deis/status/$DEIS_ETCD_DISCOVERY_TOKEN"},
 					{Name: "desiredLen", From: "cxt:DEIS_ETCD_CLUSTER_SIZE"},
 				},
 			},
@@ -173,6 +178,7 @@ func routes(reg *cookoo.Registry) {
 				Name: "startEtcd",
 				Fn:   startEtcd,
 				Using: []cookoo.Param{
+					{Name: "client", From: "cxt:discoveryClient"},
 					{Name: "discover", From: "cxt:discoveryUrl"},
 				},
 			},
@@ -201,6 +207,7 @@ func routes(reg *cookoo.Registry) {
 				Name: "startEtcd",
 				Fn:   startEtcd,
 				Using: []cookoo.Param{
+					{Name: "client", From: "cxt:discoveryClient"},
 					{Name: "discover", From: "cxt:discoveryUrl"},
 				},
 			},
@@ -235,6 +242,10 @@ func setJoinMode(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interr
 		dint = 3
 	}
 
+	// Ideally, this should look in the /deis/status directory in the discovery
+	// service. That will indicate how many members have been online in the
+	// last few hours. This is a good indicator of whether a cluster exists,
+	// even if not all the hosts are healthy.
 	res, err := etcd.SimpleGet(cli, path, true)
 	if err != nil {
 		return state, err
@@ -293,7 +304,10 @@ func passEnv(newName, passthru string) {
 //
 // Params:
 // 	- discover (string): Value to pass to etcd --discovery.
+// 	- client (client.Client): A client to the discovery server. This will
+// 	periodically write data there to indicate liveness.
 func startEtcd(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrupt) {
+	cli := p.Get("client", nil).(client.Client)
 	// Use config from environment.
 	cmd := exec.Command("etcd")
 	cmd.Stderr = os.Stderr
@@ -305,7 +319,25 @@ func startEtcd(c cookoo.Context, p *cookoo.Params) (interface{}, cookoo.Interrup
 		return nil, err
 	}
 
+	// We need a way to tell starting members that there is an existing cluster,
+	// and that that cluster has met the initial consensus requirements. This
+	// basically stores a status record that indicates that it is an existing
+	// and running etcd server. It allows for basically a two hour window
+	// during which a cluster can be in an uncertain state before the entire
+	// thing gives up and a new cluster is created.
+	ticker := time.NewTicker(time.Minute)
+	expires := time.Hour * 2
+	go func() {
+		name := c.Get("ETCD_NAME", "").(string)
+		tok := c.Get("DEIS_ETCD_DISCOVERY_TOKEN", "").(string)
+		key := fmt.Sprintf(discovery.ClusterStatusKey, tok, name)
+		for t := range ticker.C {
+			etcd.SimpleSet(cli, key, t.String(), expires)
+		}
+	}()
+
 	if err := cmd.Wait(); err != nil {
+		ticker.Stop()
 		log.Errf(c, "Etcd quit unexpectedly: %s", err)
 	}
 	return nil, nil

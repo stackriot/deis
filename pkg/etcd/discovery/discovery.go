@@ -12,6 +12,7 @@ var TokenFile = "/var/run/secrets/deis/etcd/discovery/token"
 
 const ClusterDiscoveryURL = "http://%s:%s/v2/keys/deis/discovery/%s"
 const ClusterSizeKey = "deis/discovery/%s/_config/size"
+const ClusterStatusKey = "deis/status/%s/%s"
 
 // Token reads the discovery token from the TokenFile and returns it.
 func Token() ([]byte, error) {

@@ -65,6 +65,11 @@ func SimpleGet(cli client.Client, key string, recursive bool) (*client.Response,
 	return k.Get(dctx(), key, &client.GetOptions{Recursive: recursive})
 }
 
+func SimpleSet(cli client.Client, key, value string, expires time.Duration) (*client.Response, error) {
+	k := client.NewKeysAPI(cli)
+	return k.Set(dctx(), key, value, &client.SetOptions{TTL: expires})
+}
+
 // Get performs an etcd Get operation.
 //
 // Params:
